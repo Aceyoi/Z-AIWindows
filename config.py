@@ -1,7 +1,7 @@
 import os
 
 # API ключи
-YANDEX_API_KEY = os.getenv('YANDEX_API_KEY', 'AQVN2mU0rIOJ2nAexS8Lp92oSCP0wQ98kUekF7rK')
+YANDEX_API_KEY = os.getenv('YANDEX_API_KEY', '')
 PROGRAMS_LOG_FILE = "programs_log.json"
 VOSK_MODEL_PATH = "vosk-model-small-ru-0.22"
 
