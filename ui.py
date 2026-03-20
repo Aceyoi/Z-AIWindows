@@ -1,126 +1,142 @@
 import tkinter as tk
-from tkinter import scrolledtext, messagebox
-import time  # ✅ для timestamp
-import threading  # ✅ для потоков сканирования
-import os
-from programs import ProgramManager
+from tkinter import scrolledtext, font
+import time
+import threading
 
 
 class VoiceAssistantUI:
-    def __init__(self, root, speech_manager, tts_manager, program_manager):
+    def __init__(self, root, speech, tts, programs):
         self.root = root
-        self.speech_manager = speech_manager
-        self.tts_manager = tts_manager
-        self.program_manager = program_manager
+        self.speech = speech
+        self.tts = tts
+        self.programs = programs
         self.is_listening = False
         self.setup_ui()
 
     def setup_ui(self):
-        self.root.title("🤖 Голосовой Ассистент VOSK")
-        self.root.geometry("850x700")
-        self.root.configure(bg='#2c3e50')
+        self.root.title("Голосовой Помощник")
+        self.root.geometry("850x750")
+        self.root.configure(bg='#1e272e')  # Темная тема
 
-        # Заголовок
-        title = tk.Label(self.root, text="🎤 Голосовой Ассистент - МОДУЛИ",
-                         font=('Arial', 22, 'bold'), bg='#2c3e50', fg='white')
-        title.pack(pady=15)
+        # Настройка шрифтов
+        self.main_font = font.Font(family="Segoe UI", size=11)
+        self.header_font = font.Font(family="Segoe UI Semibold", size=18)
 
-        # Лог
-        self.output = scrolledtext.ScrolledText(self.root, height=20, bg='#34495e', fg='white',
-                                                font=('Consolas', 10), wrap=tk.WORD)
+        # Консоль вывода (Лог)
+        self.output = scrolledtext.ScrolledText(
+            self.root, bg='#2f3542', fg='#ffffff',
+            font=('Consolas', 10), borderwidth=0, padx=10, pady=10
+        )
         self.output.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
-        # Поле ввода
-        input_frame = tk.Frame(self.root, bg='#2c3e50')
-        input_frame.pack(pady=10, padx=20, fill=tk.X)
+        # Поле ввода команд
+        input_label = tk.Label(self.root, text="Введите команду вручную:",
+                               bg='#1e272e', fg='#d2dae2', font=self.main_font)
+        input_label.pack(padx=20, anchor='w')
 
-        tk.Label(input_frame, text="💬 Команда:", bg='#2c3e50', fg='white',
-                 font=('Arial', 11, 'bold')).pack(anchor='w')
-        self.text_input = tk.Text(input_frame, height=3, bg='#ecf0f1', font=('Arial', 11))
-        self.text_input.pack(fill=tk.X, pady=(5, 0))
+        self.text_input = tk.Entry(
+            self.root, bg='#ffffff', fg='#2f3542',
+            font=self.main_font, borderwidth=5, relief=tk.FLAT
+        )
+        self.text_input.pack(fill=tk.X, padx=20, pady=5)
+        self.text_input.bind('<Return>', lambda e: self.execute())
 
-        # Кнопки
-        btn_frame = tk.Frame(self.root, bg='#2c3e50')
-        btn_frame.pack(pady=15)
+        # Панель кнопок
+        btn_frame = tk.Frame(self.root, bg='#1e272e')
+        btn_frame.pack(pady=20)
 
-        tk.Button(btn_frame, text="🎤 Слушать", command=self.toggle_listening,
-                  bg='#e74c3c', fg='white', font=('Arial', 13, 'bold'), width=14, height=2
-                  ).pack(side=tk.LEFT, padx=5)
+        # Стили кнопок
+        btn_opts = {"font": self.main_font, "width": 18, "height": 2, "fg": "white", "relief": tk.FLAT}
 
-        tk.Button(btn_frame, text="🔊 Сказать", command=self.speak_text,
-                  bg='#27ae60', fg='white', font=('Arial', 13, 'bold'), width=14, height=2
-                  ).pack(side=tk.LEFT, padx=5)
+        self.btn_mic = tk.Button(btn_frame, text="Слушать", command=self.toggle_mic,
+                                 bg='#ff3f34', activebackground='#ff5e57', **btn_opts)
+        self.btn_mic.pack(side=tk.LEFT, padx=10)
 
-        tk.Button(btn_frame, text="⚡ Выполнить", command=self.execute_command,
-                  bg='#3498db', fg='white', font=('Arial', 13, 'bold'), width=14, height=2
-                  ).pack(side=tk.LEFT, padx=5)
+        self.btn_run = tk.Button(btn_frame, text="Выполнить", command=self.execute,
+                                 bg='#05c46b', activebackground='#4bc233', **btn_opts)
+        self.btn_run.pack(side=tk.LEFT, padx=10)
 
-        tk.Button(btn_frame, text="🔍 Сканировать", command=self.scan_programs,
-                  bg='#9b59b6', fg='white', font=('Arial', 11, 'bold'), width=14, height=2
-                  ).pack(side=tk.LEFT, padx=5)
+        self.btn_scan = tk.Button(btn_frame, text="Обновить кэш", command=self.scan,
+                                  bg='#3c40c6', activebackground='#575fcf', **btn_opts)
+        self.btn_scan.pack(side=tk.LEFT, padx=10)
 
-        tk.Button(btn_frame, text="❓ Проверить", command=self.check_program,
-                  bg='#f1c40f', fg='black', font=('Arial', 11, 'bold'), width=14, height=2
-                  ).pack(side=tk.LEFT, padx=5)
+        # Статус-бар
+        self.status = tk.Label(self.root, text="Система готова к работе",
+                               bg='#2f3542', fg='#0be881', font=('Segoe UI', 10))
+        self.status.pack(side=tk.BOTTOM, fill=tk.X)
 
-        # Статус
-        self.status_label = tk.Label(self.root, text="⏳ Инициализация...",
-                                     bg='#2c3e50', fg='#f39c12', font=('Arial', 14, 'bold'))
-        self.status_label.pack(pady=10)
+        self.log("Ассистент успешно запущен!")
 
-        self.log("🚀 Модульный ассистент готов!")
+    def log(self, msg):
+        """Безопасная запись в лог с временем"""
 
-    def log(self, message):
-        """✅ Логирование с timestamp"""
-        timestamp = time.strftime("%H:%M:%S")
-        self.output.insert(tk.END, f"[{timestamp}] {message}\n")
-        self.output.see(tk.END)
-        self.root.update()
+        def _update():
+            t = time.strftime('%H:%M:%S')
+            self.output.insert(tk.END, f"[{t}] {msg}\n")
+            self.output.see(tk.END)
 
-    def toggle_listening(self):
+        self.root.after(0, _update)
+
+    def set_status(self, text, color="#0be881"):
+        """Обновление текста в статус-баре"""
+        self.root.after(0, lambda: self.status.config(text=text, fg=color))
+
+    def on_voice_command(self, text):
+        """Гарантированная передача текста и запуск выполнения"""
+        if not text:
+            return
+
+        # 1. Сразу останавливаем микрофон (внутренний флаг)
+        self.is_listening = False
+        self.speech.stop_listening()
+
+        # 2. Обновляем визуальную часть через .after (потокобезопасно)
+        self.root.after(0, self._process_and_run, text)
+
+    def _process_and_run(self, text):
+        """Вспомогательный метод для работы в главном потоке UI"""
+        # Обновляем кнопку и статус
+        self.btn_mic.config(text="🎤 Слушать", bg='#ff3f34')
+        self.set_status("✅ Команда принята", "#0be881")
+
+        # Записываем текст
+        self.text_input.delete(0, tk.END)
+        self.text_input.insert(0, text)
+        self.log(f"🎤 Распознано: {text}")
+
+        # Запускаем выполнение
+        self.execute()
+
+    def toggle_mic(self):
         if not self.is_listening:
             self.is_listening = True
-            self.speech_manager.start_listening()
-            self.status_label.config(text="🎤 СЛУШАЮ...", fg='#2ecc71')
-            self.log("🎤 Слушаю голосовые команды...")
+            self.speech.start_listening(self.on_voice_command)
+            self.btn_mic.config(text="Стоп", bg='#ef5777')
+            self.log("Микрофон включен. Говорите...")
+            self.set_status("Идет запись голоса...", "#ff3f34")
         else:
             self.is_listening = False
-            self.speech_manager.stop_listening()
-            self.status_label.config(text="⏸️ Остановлен", fg='#e67e22')
-            self.log("🛑 Слушание остановлено")
+            self.speech.stop_listening()
+            self.btn_mic.config(text="Слушать", bg='#ff3f34')
+            self.log("Микрофон отключен.")
+            self.set_status("Режим ожидания")
 
-    def speak_text(self):
-        text = self.text_input.get(1.0, tk.END).strip()
-        if text:
-            self.tts_manager.speak_async(text)
-            self.log(f"🔊 Произношу: '{text[:50]}...'")
-
-    def execute_command(self):
-        """⚡ Выполнить текстовую команду"""
-        text = self.text_input.get(1.0, tk.END).strip().lower()
-        if not text:
-            self.log("❌ Введите команду!")
+    def execute(self):
+        cmd = self.text_input.get().strip()
+        if not cmd:
             return
 
-        self.log(f"⚡ Выполняю: '{text}'")
-        self.program_manager.execute_command(text, self.log, self.tts_manager.speak)
+        # Запускаем выполнение в отдельном потоке, чтобы UI не завис на время старта программы
+        threading.Thread(target=self.programs.execute_command,
+                         args=(cmd, self.log, self.tts.speak), daemon=True).start()
 
-    def scan_programs(self):
-        """🔍 Сканировать программы в отдельном потоке"""
-        threading.Thread(target=self.program_manager.scan_all, args=(self.log,), daemon=True).start()
-        self.log("🔍 Запущено полное сканирование...")
+    def scan(self):
+        self.btn_scan.config(state=tk.DISABLED)
+        self.set_status("Идет сканирование системы...", "#ffc048")
 
-    def check_program(self):
-        """❓ Проверить наличие программы"""
-        text = self.text_input.get(1.0, tk.END).strip().lower()
-        if not text:
-            messagebox.showwarning("Проверка", "Введите название программы!")
-            return
+        def run_scan():
+            self.programs.scan_all(self.log)
+            self.root.after(0, lambda: self.btn_scan.config(state=tk.NORMAL))
+            self.set_status("Сканирование завершено")
 
-        results = self.program_manager.find_program(text)
-        if results:
-            msg = "Найдены программы:\n\n" + "\n".join([f"• {r[0]} ({r[1]:.0%})" for r in results[:10]])
-            messagebox.showinfo("✅ Найдено", msg)
-            self.log(f"✅ Найдено {len(results)} совпадений")
-        else:
-            messagebox.showinfo("❌ Не найдено", "Программа не найдена в кэше")
+        threading.Thread(target=run_scan, daemon=True).start()

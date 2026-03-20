@@ -1,153 +1,143 @@
 import os
 import json
-import threading
+import subprocess
 from pathlib import Path
-from config import PROGRAMS_LOG_FILE, SEARCH_PATHS, SYSTEM_COMMANDS
+from config import PROGRAMS_LOG_FILE, SEARCH_PATHS, SYSTEM_COMMANDS, GREETINGS, EXIT_COMMANDS
 
 
 class ProgramManager:
     def __init__(self):
-        self.programs_db = {}
+        self.db = {}
         self.load_cache()
 
     def load_cache(self):
         if os.path.exists(PROGRAMS_LOG_FILE):
             try:
                 with open(PROGRAMS_LOG_FILE, 'r', encoding='utf-8') as f:
-                    self.programs_db = json.load(f)
-                print(f"📂 Загружено {len(self.programs_db)} программ из кэша")
-            except:
-                print("⚠️ Кэш сброшен")
-
-    def save_cache(self):
-        try:
-            with open(PROGRAMS_LOG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.programs_db, f, ensure_ascii=False, indent=2)
-        except:
-            pass
-
-    def execute_command(self, text, log_callback, speak_callback=None):
-        text_lower = text.lower()
-
-        # Системные команды
-        for cmd, exe in SYSTEM_COMMANDS.items():
-            if cmd in text_lower:
-                try:
-                    os.startfile(exe)
-                    log_callback(f"✅ {cmd.upper()} открыт")
-                    if speak_callback:
-                        speak_callback(f"Открываю {cmd}")
-                    return
-                except:
-                    log_callback(f"❌ Ошибка запуска {cmd}")
-
-        # Поиск программ
-        if any(cmd in text_lower for cmd in ['открой', 'запусти', 'открыть']):
-            words = text_lower.split()
-            program_name = []
-            for i, word in enumerate(words):
-                if word in ['открой', 'открыть', 'запусти'] and i + 1 < len(words):
-                    program_name = words[i + 1:]
-                    break
-
-            if program_name:
-                self.execute_program(' '.join(program_name), log_callback)
-            else:
-                log_callback("❓ Укажите программу после команды")
-
-    def execute_program(self, program_name, log_callback):
-        program_name = program_name.strip().lower()
-        log_callback(f"🔍 Поиск: '{program_name}'")
-
-        # 1. Фаззи-поиск в кэше
-        candidates = []
-        for name in self.programs_db:
-            a = set(program_name.split())
-            b = set(name.split())
-            similarity = len(a & b) / len(a | b) if a | b else 0
-            if similarity > 0.3:
-                candidates.append((name, similarity, self.programs_db[name]))
-
-        candidates.sort(key=lambda x: x[1], reverse=True)
-
-        # 2. Запуск из кэша
-        for name, score, path in candidates[:3]:
-            if os.path.exists(path):
-                try:
-                    os.startfile(path)
-                    log_callback(f"✅ ОТКРЫТА: {name} ({score:.0%})")
-                    return
-                except:
-                    continue
-
-        # 3. Реал-тайм поиск
-        found_path = self.find_exe_real_time(program_name)
-        if found_path:
-            try:
-                os.startfile(found_path)
-                name = Path(found_path).stem.lower()
-                self.programs_db[name] = found_path
-                self.programs_db[program_name] = found_path
-                self.save_cache()
-                log_callback(f"✅ НАЙДЕНА: {os.path.basename(found_path)}")
-                return
+                    self.db = json.load(f)
             except:
                 pass
 
-        log_callback(f"❌ '{program_name}' не найдена")
+    def save_cache(self):
+        with open(PROGRAMS_LOG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(self.db, f, ensure_ascii=False, indent=2)
 
-    def find_exe_real_time(self, program_name):
-        words = program_name.split()
-        resolved_paths = [p() if callable(p) else p for p in SEARCH_PATHS]
+    def execute_command(self, text, log_cb, speak_cb):
+        # Очистка текста от лишних знаков
+        text = text.lower().strip()
+        if not text: return
 
-        for base_path in resolved_paths:
+        # 1. Проверка на "Пока" (Выход из программы)
+        if 'пока' in text or 'выход' in text:
+            log_cb("[EXIT] Завершение работы...")
+            speak_cb("До свидания! Выключаюсь.")
+            # Даем небольшую паузу, чтобы успела прозвучать фраза, и закрываем
+            import time
+            time.sleep(2)
+            os._exit(0)  # Жесткое завершение всех потоков и окна
+            return
+
+        # 1. Проверка на приветствия (поиск подстроки)
+        for word, response in GREETINGS.items():
+            if word in text:
+                log_cb(f"[INFO] Общение: {word}")
+                speak_cb(response)
+                return
+
+        # 2. Проверка на команды закрытия
+        if any(word in text for word in ['закрой', 'выключи', 'заверши']):
+            for cmd_trigger, process in EXIT_COMMANDS.items():
+                # Ищем ключевое слово программы в тексте
+                prog_label = cmd_trigger.replace('закрой ', '')
+                if prog_label in text:
+                    os.system(f"taskkill /f /im {process}")
+                    log_cb(f"[OK] Закрыто: {process}")
+                    speak_cb(f"Закрываю {prog_label}")
+                    return
+
+        # 3. Системные команды на открытие (без жесткой привязки к началу строки)
+        for cmd, exe in SYSTEM_COMMANDS.items():
+            if cmd in text:
+                os.startfile(exe)
+                log_cb(f"[OK] Запуск: {cmd}")
+                speak_cb(f"Открываю {cmd}")
+                return
+
+        # 4. Поиск через ключевые слова 'открой' или 'запусти'
+        keywords = ['открой', 'запусти', 'открыть']
+        if any(k in text for k in keywords):
+            # Убираем ключевое слово, оставляем только название
+            clean_name = text
+            for k in keywords:
+                clean_name = clean_name.replace(k, '')
+            self._launch(clean_name.strip(), log_cb, speak_cb)
+        else:
+            # Если ключевых слов нет, пробуем поискать всё предложение в базе
+            self._launch(text, log_cb, speak_cb)
+
+    def _launch(self, name, log_cb, speak_cb):
+        # Поиск в кэше
+        for k in self.db:
+            if name in k or k in name:
+                os.startfile(self.db[k])
+                log_cb(f"[OK] Из кэша: {k}")
+                speak_cb(f"Запускаю {k}")
+                return
+
+        # Поиск в реальном времени
+        path = self._scan_for(name)
+        if path:
+            os.startfile(path)
+            self.db[name] = path
+            self.save_cache()
+            log_cb(f"[OK] Найдено: {name}")
+            speak_cb(f"Нашла и запускаю {name}")
+        else:
+            log_cb(f"[FAIL] Не найдено: {name}")
+            speak_cb(f"Я не нашла программу {name}")
+
+    def _scan_for(self, name):
+        # Получаем все пути, включая результат выполнения lambda-функций
+        paths = [p() if callable(p) else p for p in SEARCH_PATHS]
+
+        name = name.lower()
+        for base_path in paths:
             if not os.path.exists(base_path):
                 continue
+
             try:
-                for root, _, files in os.walk(base_path, max_depth=3):
-                    for file in files:
-                        if file.lower().endswith('.exe'):
-                            if any(word in file.lower() for word in words):
-                                return os.path.join(root, file)
-            except:
+                # Рекурсивный обход
+                for root, dirs, files in os.walk(base_path):
+                    # Ограничение глубины (чтобы не уходить в дебри системных папок)
+                    depth = root.count(os.sep) - base_path.count(os.sep)
+                    if depth > 3:
+                        del dirs[:]  # Перестаем заходить глубже в подпапки
+                        continue
+
+                    for f in files:
+                        if f.lower().endswith('.exe'):
+                            # Если имя файла содержит искомое слово (например, "steam")
+                            if name in f.lower():
+                                full_path = os.path.join(root, f)
+                                return full_path
+            except PermissionError:
+                continue  # Пропускаем папки, куда нет доступа
+            except Exception:
                 continue
         return None
 
-    def find_program(self, program_name):
-        """Поиск для кнопки проверки"""
-        candidates = []
-        for name in self.programs_db:
-            a = set(program_name.split())
-            b = set(name.split())
-            similarity = len(a & b) / len(a | b) if a | b else 0
-            if similarity > 0.3:
-                candidates.append((name, similarity))
-        return sorted(candidates, key=lambda x: x[1], reverse=True)
-
-    def scan_all(self, log_callback):
-        """🔍 Полное сканирование с логом"""
-        log_callback("🔍 Полное сканирование...")
-        programs = dict(self.programs_db)
-        resolved_paths = [p() if callable(p) else p for p in SEARCH_PATHS]
-
-        total_new = 0
-        for root_path in resolved_paths:
-            if os.path.exists(root_path):
-                log_callback(f"📁 {os.path.basename(root_path) or root_path}")
-                try:
-                    for root_dir, _, files in os.walk(root_path, max_depth=2):
-                        for file in files:
-                            if file.lower().endswith('.exe'):
-                                name = Path(file).stem.lower()
-                                full_path = os.path.join(root_dir, file)
-                                if name not in programs and os.path.exists(full_path):
-                                    programs[name] = full_path
-                                    total_new += 1
-                except:
-                    pass
-
-        self.programs_db = programs
+    def scan_all(self, log_cb):
+        log_cb("[SCAN] Начато полное сканирование...")
+        paths = [p() if callable(p) else p for p in SEARCH_PATHS]
+        for p in paths:
+            if not os.path.exists(p): continue
+            try:
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        if f.lower().endswith('.exe'):
+                            self.db[Path(f).stem.lower()] = os.path.join(root, f)
+                    if root.count(os.sep) - p.count(os.sep) > 1: break
+            except:
+                continue
         self.save_cache()
-        log_callback(f"✅ ДОБАВЛЕНО {total_new} ПРОГРАММ")
-        log_callback(f"✅ ВСЕГО: {len(programs)}")
-
+        log_cb(f"[SCAN] Готово. В базе: {len(self.db)}")

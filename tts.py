@@ -2,28 +2,25 @@ import threading
 import grpc
 import io
 import pydub
-from playsound import playsound
 import tempfile
 import os
+from playsound import playsound
 from cloudapi.output.yandex.cloud.ai.tts.v3 import tts_service_pb2_grpc, tts_pb2
 from config import YANDEX_API_KEY
-
 
 class TTSManager:
     def __init__(self):
         self.api_key = YANDEX_API_KEY
 
     def speak(self, text):
-        """Синхронное воспроизведение"""
         try:
             audio = self._synthesize_speech(text)
             if audio:
                 self._play_audio(audio)
         except Exception as e:
-            print(f"TTS ошибка: {e}")
+            print(f"TTS Error: {e}")
 
     def speak_async(self, text):
-        """Асинхронное воспроизведение"""
         threading.Thread(target=self.speak, args=(text,), daemon=True).start()
 
     def _synthesize_speech(self, text):
@@ -43,15 +40,15 @@ class TTSManager:
                 audio_data.write(response.audio_chunk.data)
             audio_data.seek(0)
             return pydub.AudioSegment.from_wav(audio_data)
-        except Exception:
+        except:
             return None
 
     def _play_audio(self, audio_segment):
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+            tmp_path = tmp.name
+            audio_segment.export(tmp_path, format='wav')
         try:
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-                tmp.close()
-                audio_segment.export(tmp.name, format='wav')
-                playsound(tmp.name)
-                os.remove(tmp.name)
-        except Exception:
-            pass
+            playsound(tmp_path)
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)

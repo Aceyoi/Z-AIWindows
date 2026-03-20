@@ -1,40 +1,29 @@
 import tkinter as tk
-import threading
 from ui import VoiceAssistantUI
 from speech import SpeechManager
 from tts import TTSManager
 from programs import ProgramManager
-import time
 
 
 def main():
     root = tk.Tk()
 
     # Инициализация менеджеров
-    program_manager = ProgramManager()
+    # Мы передаем заглушку в speech_manager, так как UI еще не создан
     tts_manager = TTSManager()
+    program_manager = ProgramManager()
 
-    def log_callback(message):
-        print(f"[{time.strftime('%H:%M:%S')}] {message}")
-        # Лог передаётся в UI
+    # Создаем временную функцию лога, пока UI не инициализирован
+    def temporary_log(msg): print(f"[INIT] {msg}")
 
-    speech_manager = SpeechManager(log_callback)
+    speech_manager = SpeechManager(temporary_log)
 
-    # UI
+    # Создаем интерфейс
     app = VoiceAssistantUI(root, speech_manager, tts_manager, program_manager)
 
-    # Обработка голосовых команд
-    def process_voice(text):
-        app.log(f"🎤 ГОЛОС: '{text}'")
-        app.text_input.delete(1.0, tk.END)
-        app.text_input.insert(1.0, text)
-        program_manager.execute_command(text, app.log, tts_manager.speak)
+    # Обновляем логгер в speech_manager на логгер из интерфейса
+    speech_manager.log = app.log
 
-    # Запуск
-    root.protocol("WM_DELETE_WINDOW", lambda: (
-        speech_manager.stop_listening(),
-        root.destroy()
-    ))
     root.mainloop()
 
 
